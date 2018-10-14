@@ -1,8 +1,10 @@
+from neo.Settings import settings
 from neo.Core.Blockchain import Blockchain
-from neo.api.JSONRPC.JsonRpcApi import JsonRpcApi, JsonRpcError
-from neo.Implementations.Wallets.peewee.UserWallet import UserWallet
+from neo.api.JSONRPC.JsonRpcApi import JsonRpcApi, JsonRpcError, AbstractJsonRpcApi
 from neocore.UInt256 import UInt256
+
 import datetime
+import base58
 
 
 class ExtendedJsonRpcApi(JsonRpcApi):
@@ -59,3 +61,38 @@ class ExtendedJsonRpcApi(JsonRpcApi):
                 raise JsonRpcError(-400, "Access denied.")
 
         return super(ExtendedJsonRpcApi, self).json_rpc_method_handler(method, params)  
+
+
+class ExtendedJsonRpcApiAuth(AbstractJsonRpcApi):
+    """
+        RPC calls in these class required basic HTPP authentication.
+    """
+
+    def json_rpc_method_handler(self, method, params):
+
+        if method == "dumpprivkey":
+            if self.wallet:
+                return self.dump_priv_key(params)
+            else:
+                raise JsonRpcError(-400, "Access denied.")
+
+        raise JsonRpcError.methodNotFound()
+
+    def dump_priv_key(self, params):
+        if not params or params[0] == '':
+            raise JsonRpcError(-100, "Missing argument")
+
+        isValid = False
+        try:
+            data = base58.b58decode_check(params[0])
+            if len(data) == 21 and data[0] == settings.ADDRESS_VERSION:
+                isValid = True
+        except Exception as e:
+            pass
+        if isValid:
+            keys = self.wallet.GetKeys()
+            for key in keys:
+                if key.GetAddress() == params[0]:
+                    export = key.Export()
+                    return export
+        raise JsonRpcError(-32602, "Invalid params")

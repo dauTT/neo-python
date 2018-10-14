@@ -49,11 +49,16 @@ from twisted.logger import STDLibLogObserver, globalLogPublisher
 from twisted.internet import reactor, task, endpoints
 from twisted.web.server import Site
 
+# Twisted basic HTPP authentication
+from neo.api.JSONRPC.auth import BasicUserPassCredentialChecker, guard_resource_with_http_auth
+
 # neo methods and modules
 from neo.Core.Blockchain import Blockchain
 from neo.Implementations.Blockchains.LevelDB.LevelDBBlockchain import LevelDBBlockchain
 from neo.api.JSONRPC.JsonRpcApi import JsonRpcApi
 from neo.api.JSONRPC.ExtendedJsonRpcApi import ExtendedJsonRpcApi
+
+
 from neo.Implementations.Notifications.LevelDB.NotificationDB import NotificationDB
 from neo.api.REST.RestApi import RestApi
 from neo.Wallets.utils import to_aes_key
@@ -201,11 +206,12 @@ def main():
         passwd = os.environ.get('NEO_PYTHON_JSONRPC_WALLET_PASSWORD', None)
         if not passwd:
             passwd = prompt("[password]> ", is_password=True)
+            username = prompt("[username]> ", is_password=True)
 
         password_key = to_aes_key(passwd)
         try:
             wallet = UserWallet.Open(args.wallet, password_key)
-
+            credentialChecker = BasicUserPassCredentialChecker(username, password_key)
         except Exception as e:
             print(f"Could not open wallet {e}")
             return
@@ -251,9 +257,10 @@ def main():
 
     if args.port_rpc and args.extended_rpc:
         logger.info("Starting extended json-rpc api server on http://%s:%s" % (args.host, args.port_rpc))
+        resource = guard_resource_with_http_auth(credentialChecker, args.port_rpc, wallet)
         api_server_rpc = ExtendedJsonRpcApi(args.port_rpc, wallet=wallet)
         endpoint_rpc = "tcp:port={0}:interface={1}".format(args.port_rpc, args.host)
-        endpoints.serverFromString(reactor, endpoint_rpc).listen(Site(api_server_rpc.app.resource()))
+        endpoints.serverFromString(reactor, endpoint_rpc).listen(Site(resource))
 #        reactor.listenTCP(int(args.port_rpc), server.Site(api_server_rpc))
 #        api_server_rpc.app.run(args.host, args.port_rpc)
 

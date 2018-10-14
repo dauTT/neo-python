@@ -36,6 +36,7 @@ from neo.VM.VMState import VMStateStr
 from neo.Implementations.Wallets.peewee.Models import Account
 from neo.Prompt.Utils import get_asset_id
 from neo.Wallets.Wallet import Wallet
+from abc import ABC, abstractmethod
 
 
 class JsonRpcError(Exception):
@@ -76,13 +77,14 @@ class JsonRpcError(Exception):
         return JsonRpcError(-32603, message or "Internal error")
 
 
-class JsonRpcApi:
+class AbstractJsonRpcApi(ABC):
     app = Klein()
     port = None
 
     def __init__(self, port, wallet=None):
         self.port = port
         self.wallet = wallet
+        super().__init__()
 
     def get_data(self, body: dict):
 
@@ -141,6 +143,13 @@ class JsonRpcApi:
         except JSONDecodeError as e:
             error = JsonRpcError.parseError()
             return self.get_custom_error_payload(request_id, error.code, error.message)
+
+    @abstractmethod
+    def json_rpc_method_handler(self, method, params):
+        pass
+
+
+class JsonRpcApi(AbstractJsonRpcApi):
 
     def json_rpc_method_handler(self, method, params):
 

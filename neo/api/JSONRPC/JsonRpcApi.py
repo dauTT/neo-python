@@ -15,7 +15,7 @@ from klein import Klein
 
 from neo.Settings import settings
 from neo.Core.Blockchain import Blockchain
-from neo.api.utils import json_response, cors_header
+from neo.api.utils import json_response, cors_header, LimitedSizeDict
 from neo.Core.State.AccountState import AccountState
 from neo.Core.TX.Transaction import Transaction, TransactionOutput, \
     ContractTransaction
@@ -37,6 +37,10 @@ from neo.Implementations.Wallets.peewee.Models import Account
 from neo.Prompt.Utils import get_asset_id
 from neo.Wallets.Wallet import Wallet
 
+from twisted.internet import reactor, defer
+from twisted.internet.task import deferLater
+import base64
+import time
 
 class JsonRpcError(Exception):
     """
@@ -75,14 +79,21 @@ class JsonRpcError(Exception):
     def internalError(message=None):
         return JsonRpcError(-32603, message or "Internal error")
 
+    @staticmethod
+    def AuthError():
+        return JsonRpcError(401, "Authorization required. Invalid username or password!")
+
 
 class JsonRpcApi:
     app = Klein()
     port = None
 
-    def __init__(self, port, wallet=None):
+    def __init__(self, port, wallet=None, username=None):
         self.port = port
         self.wallet = wallet
+        self.username = username
+        self.method_required_auth = ['sendtoaddress', 'sendfrom',  'sendmany']
+        self.consecutive_errors_history = LimitedSizeDict(size_limit=100)
 
     def get_data(self, body: dict):
 
@@ -113,6 +124,48 @@ class JsonRpcApi:
             error = JsonRpcError.internalError(str(e))
             return self.get_custom_error_payload(request_id, error.code, error.message)
 
+    def backoff(self, n: int, t: float):
+        return time.sleep(t * 2 ** (n - 1))
+
+    def get_consecutive_errors(self, username): 
+        consecutive_errors = self.consecutive_errors_history.get(username)
+        if consecutive_errors:
+            if consecutive_errors < 100:
+                consecutive_errors += 1
+                self.consecutive_errors_history[username] = consecutive_errors
+        else:
+            consecutive_errors = 1
+            self.consecutive_errors_history[username] = consecutive_errors
+        return consecutive_errors
+
+    def get_data_auth_wrapper(self, request, content):
+
+        auth = request.getHeader('Authorization')
+
+        if content['method'] in self.method_required_auth:
+
+            if auth and auth.split(' ')[0] == 'Basic':
+
+                decodeddata = base64.decodebytes(auth.split(' ')[1].encode("utf-8"))
+                username, password = decodeddata.decode("utf-8").split(':') 
+
+                if username == self.username and self.wallet.ValidatePassword(password):
+                    return self.get_data(content)
+
+            consecutive_errors = self.get_consecutive_errors(username)
+
+            request.setResponseCode(401)
+            request.setHeader('WWW-Authenticate', 'Basic realm="realmname"')
+
+            self.backoff(consecutive_errors, 2)
+
+            error = JsonRpcError.AuthError()
+
+            return self.get_custom_error_payload(None, error.code, error.message)
+
+        else:
+            return self.get_data(content)
+
     #
     # JSON-RPC API Route
     #
@@ -122,7 +175,7 @@ class JsonRpcApi:
     def home(self, request):
         # {"jsonrpc": "2.0", "id": 5, "method": "getblockcount", "params": []}
         # or multiple requests in 1 transaction
-        # [{"jsonrpc": "2.0", "id": 1, "method": "getblock", "params": [10], {"jsonrpc": "2.0", "id": 2, "method": "getblock", "params": [10,1]}
+        # [{"jsonrpc": "2.0", "id": 1, "method": "getblock", "params": [10]}, {"jsonrpc": "2.0", "id": 2, "method": "getblock", "params": [10,1]}]
         request_id = None
 
         try:
@@ -132,11 +185,11 @@ class JsonRpcApi:
             if isinstance(content, list):
                 result = []
                 for body in content:
-                    result.append(self.get_data(body))
+                    result.append(self.get_data_auth_wrapper(request, body))
                 return result
 
             # otherwise it's a single request
-            return self.get_data(content)
+            return self.get_data_auth_wrapper(request, content)
 
         except JSONDecodeError as e:
             error = JsonRpcError.parseError()
@@ -316,6 +369,7 @@ class JsonRpcApi:
         raise JsonRpcError.methodNotFound()
 
     def get_custom_error_payload(self, request_id, code, message):
+        print("get_custom_error_payload", message)
         return {
             "jsonrpc": "2.0",
             "id": request_id,

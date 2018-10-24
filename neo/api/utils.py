@@ -1,6 +1,7 @@
 import json
 import gzip
 from functools import wraps
+from collections import OrderedDict 
 
 COMPRESS_FASTEST = 1
 BASE_STRING_SIZE = 49
@@ -45,3 +46,23 @@ def cors_header(func):
         return res
 
     return wrapper
+
+
+class LimitedSizeDict(OrderedDict):
+    """ This is an OrderedDict list which tracks only the most recent entries. Its size is defined
+        by the key ward parameter 'size_limit'.
+        Example: LimitedSizeDict(size_limit=100) track only the most recent 100 entries
+    """
+    def __init__(self, *args, **kwds):
+        self.size_limit = kwds.pop("size_limit", None)
+        super(OrderedDict, self).__init__(self, *args, **kwds)
+        self._check_size_limit()
+
+    def __setitem__(self, key, value):
+        OrderedDict.__setitem__(self, key, value)
+        self._check_size_limit()
+
+    def _check_size_limit(self):
+        if self.size_limit is not None:
+            while len(self) > self.size_limit:
+                self.popitem(last=False)

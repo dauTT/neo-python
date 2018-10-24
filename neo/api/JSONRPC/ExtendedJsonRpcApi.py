@@ -2,18 +2,21 @@ from neo.Core.Blockchain import Blockchain
 from neo.api.JSONRPC.JsonRpcApi import JsonRpcApi, JsonRpcError
 from neo.Implementations.Wallets.peewee.UserWallet import UserWallet
 from neocore.UInt256 import UInt256
-import datetime
+from neo.Settings import settings
 
+import datetime
+import base58
 
 class ExtendedJsonRpcApi(JsonRpcApi):
     """
     Extended JSON-RPC API Methods
     """
 
-    def __init__(self, port, wallet=None):
+    def __init__(self, port, wallet=None, username=None):
         self.start_height = Blockchain.Default().Height
         self.start_dt = datetime.datetime.utcnow()
-        super(ExtendedJsonRpcApi, self).__init__(port, wallet)
+        super(ExtendedJsonRpcApi, self).__init__(port, wallet, username)
+        self.method_required_auth.append('dumpprivkey')
 
     def json_rpc_method_handler(self, method, params):
 
@@ -58,4 +61,28 @@ class ExtendedJsonRpcApi(JsonRpcApi):
             else:
                 raise JsonRpcError(-400, "Access denied.")
 
-        return super(ExtendedJsonRpcApi, self).json_rpc_method_handler(method, params)  
+        elif method == "dumpprivkey":
+            if self.wallet:
+                return self.dump_priv_key(params)
+            else:
+                raise JsonRpcError(-400, "Access denied.")
+
+        return super(ExtendedJsonRpcApi, self).json_rpc_method_handler(method, params)
+
+    def dump_priv_key(self, params):
+        if not params or params[0] == '':
+            raise JsonRpcError(-100, "Missing argument")
+        isValid = False
+        try:
+            data = base58.b58decode_check(params[0])
+            if len(data) == 21 and data[0] == settings.ADDRESS_VERSION:
+                isValid = True
+        except Exception as e:
+            pass
+        if isValid:
+            keys = self.wallet.GetKeys()
+            for key in keys:
+                if key.GetAddress() == params[0]:
+                    export = key.Export()
+                    return export
+        raise JsonRpcError(-32602, "Invalid params")

@@ -201,6 +201,7 @@ def main():
         passwd = os.environ.get('NEO_PYTHON_JSONRPC_WALLET_PASSWORD', None)
         if not passwd:
             passwd = prompt("[password]> ", is_password=True)
+            username = prompt("[username]> ", is_password=True)
 
         password_key = to_aes_key(passwd)
         try:
@@ -251,7 +252,7 @@ def main():
 
     if args.port_rpc and args.extended_rpc:
         logger.info("Starting extended json-rpc api server on http://%s:%s" % (args.host, args.port_rpc))
-        api_server_rpc = ExtendedJsonRpcApi(args.port_rpc, wallet=wallet)
+        api_server_rpc = ExtendedJsonRpcApi(args.port_rpc, wallet=wallet, username=username)
         endpoint_rpc = "tcp:port={0}:interface={1}".format(args.port_rpc, args.host)
         endpoints.serverFromString(reactor, endpoint_rpc).listen(Site(api_server_rpc.app.resource()))
 #        reactor.listenTCP(int(args.port_rpc), server.Site(api_server_rpc))
@@ -259,7 +260,7 @@ def main():
 
     elif args.port_rpc:
         logger.info("Starting json-rpc api server on http://%s:%s" % (args.host, args.port_rpc))
-        api_server_rpc = JsonRpcApi(args.port_rpc, wallet=wallet)
+        api_server_rpc = JsonRpcApi(args.port_rpc, wallet=wallet, username=username)
         endpoint_rpc = "tcp:port={0}:interface={1}".format(args.port_rpc, args.host)
         endpoints.serverFromString(reactor, endpoint_rpc).listen(Site(api_server_rpc.app.resource()))
 #        reactor.listenTCP(int(args.port_rpc), server.Site(api_server_rpc))

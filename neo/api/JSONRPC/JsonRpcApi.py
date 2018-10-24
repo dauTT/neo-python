@@ -125,7 +125,7 @@ class JsonRpcApi:
             return self.get_custom_error_payload(request_id, error.code, error.message)
 
     def backoff(self, n: int, t: float):
-        return time.sleep(t * 2 ** (n - 1))
+        return t * 2 ** (n - 1)
 
     def get_consecutive_errors(self, username): 
         consecutive_errors = self.consecutive_errors_history.get(username)
@@ -150,21 +150,19 @@ class JsonRpcApi:
                 username, password = decodeddata.decode("utf-8").split(':') 
 
                 if username == self.username and self.wallet.ValidatePassword(password):
-                    return self.get_data(content)
+                    return deferLater(reactor, 0, self.get_data, content)
 
             consecutive_errors = self.get_consecutive_errors(username)
 
             request.setResponseCode(401)
             request.setHeader('WWW-Authenticate', 'Basic realm="realmname"')
-
-            self.backoff(consecutive_errors, 2)
-
             error = JsonRpcError.AuthError()
 
-            return self.get_custom_error_payload(None, error.code, error.message)
+            return deferLater(reactor, self.backoff(consecutive_errors, 2), 
+                              self.get_custom_error_payload, None, error.code, error.message)
 
         else:
-            return self.get_data(content)
+            return deferLater(reactor, 0, self.get_data, content)
 
     #
     # JSON-RPC API Route
@@ -183,17 +181,18 @@ class JsonRpcApi:
 
             # test if it's a multi-request message
             if isinstance(content, list):
-                result = []
+                dl_result = []
                 for body in content:
-                    result.append(self.get_data_auth_wrapper(request, body))
-                return result
+                    dl_result.append(self.get_data_auth_wrapper(request, body))
+
+                return defer.DeferredList(dl_result)
 
             # otherwise it's a single request
             return self.get_data_auth_wrapper(request, content)
 
         except JSONDecodeError as e:
             error = JsonRpcError.parseError()
-            return self.get_custom_error_payload(request_id, error.code, error.message)
+            return deferLater(reactor, 0, self.get_custom_error_payload, request_id, error.code, error.message)
 
     def json_rpc_method_handler(self, method, params):
 
@@ -369,7 +368,6 @@ class JsonRpcApi:
         raise JsonRpcError.methodNotFound()
 
     def get_custom_error_payload(self, request_id, code, message):
-        print("get_custom_error_payload", message)
         return {
             "jsonrpc": "2.0",
             "id": request_id,
